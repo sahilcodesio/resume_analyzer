@@ -2,6 +2,7 @@ import streamlit as st
 import re
 from PyPDF2 import PdfReader
 import pandas as pd
+import plotly.graph_objects as go
 
 # ---------------- PAGE CONFIG ----------------
 
@@ -42,6 +43,9 @@ SOFT_SKILLS = [
 
 # ---------------- PDF TEXT EXTRACTION ----------------
 
+# FIX 1: Added @st.cache_data so PDF is not re-read on every button click
+
+@st.cache_data
 def extract_text_from_pdf(uploaded_file):
 
     text = ""
@@ -80,14 +84,16 @@ def extract_email(text):
 
 # ---------------- PHONE EXTRACTOR ----------------
 
+# FIX 2: Changed regex to support international numbers, not just Indian
+
 def extract_phone(text):
 
-    pattern = r'[6789]\d{9}'
+    pattern = r'(\+?\d[\d\s\-().]{7,}\d)'
 
     matches = re.findall(pattern, text)
 
     if matches:
-        return matches[0]
+        return matches[0].strip()
 
     return "Not Found"
 
@@ -155,10 +161,24 @@ def analyze_resume(resume_text, job_description):
         if word_match(resume_text, skill)
     ]
 
-    score = len(found_skills) * 8 + len(found_soft) * 5
+    # FIX 3: ATS Score now based on JD overlap instead of fixed points
+    # We check which skills are mentioned in JD, then see how many are in resume
 
-    if score > 100:
-        score = 100
+    jd_skills = [
+        skill for skill in TECH_SKILLS
+        if word_match(job_description, skill)
+    ]
+
+    if jd_skills:
+        matched_jd_skills = [
+            s for s in jd_skills
+            if word_match(resume_text, s)
+        ]
+        score = int((len(matched_jd_skills) / len(jd_skills)) * 100)
+
+    else:
+        # Fallback if no JD provided
+        score = min(len(found_skills) * 8 + len(found_soft) * 5, 100)
 
     missing_skills = [
         skill for skill in TECH_SKILLS
@@ -369,33 +389,42 @@ if st.button("Analyze Resume"):
 
         # ---------------- TECHNICAL SKILLS ----------------
 
+        # FIX 4: Replaced meaningless st.progress(100) with colored skill badges
+
         st.subheader("🛠 Technical Skills Found")
 
-        for skill in tech:
-
-            st.write(f"✅ {skill}")
-
-            st.progress(100)
+        if tech:
+            badges = " ".join([
+                f'<span style="background:#1f77b4;color:white;padding:4px 12px;border-radius:12px;margin:3px;display:inline-block">{skill}</span>'
+                for skill in tech
+            ])
+            st.markdown(badges, unsafe_allow_html=True)
+        else:
+            st.info("No technical skills found.")
 
         # ---------------- SOFT SKILLS ----------------
 
         st.subheader("🤝 Soft Skills Found")
 
-        for skill in soft:
-
-            st.write(f"✅ {skill}")
-
-            st.progress(80)
+        if soft:
+            badges = " ".join([
+                f'<span style="background:#2ecc71;color:white;padding:4px 12px;border-radius:12px;margin:3px;display:inline-block">{skill}</span>'
+                for skill in soft
+            ])
+            st.markdown(badges, unsafe_allow_html=True)
+        else:
+            st.info("No soft skills found.")
 
         # ---------------- MISSING SKILLS ----------------
 
         st.subheader("❌ Skills Missing")
 
-        for skill in missing[:10]:
-
-            st.write(f"❌ {skill}")
-
-            st.progress(20)
+        if missing:
+            badges = " ".join([
+                f'<span style="background:#e74c3c;color:white;padding:4px 12px;border-radius:12px;margin:3px;display:inline-block">{skill}</span>'
+                for skill in missing[:10]
+            ])
+            st.markdown(badges, unsafe_allow_html=True)
 
         # ---------------- MATCHED KEYWORDS ----------------
 
@@ -419,24 +448,20 @@ if st.button("Analyze Resume"):
 
         # ---------------- CHART ----------------
 
+        # FIX 5: Replaced bar chart with Plotly donut chart
+
         st.subheader("📈 Skills Analysis Chart")
 
-        chart_data = pd.DataFrame({
-            "Category": [
-                "Technical Skills",
-                "Soft Skills",
-                "Missing Skills"
-            ],
-            "Count": [
-                len(tech),
-                len(soft),
-                len(missing)
-            ]
-        })
+        fig = go.Figure(data=[go.Pie(
+            labels=["Technical Skills", "Soft Skills", "Missing Skills"],
+            values=[len(tech), len(soft), len(missing)],
+            hole=0.4,
+            marker=dict(colors=["#2ecc71", "#3498db", "#e74c3c"])
+        )])
 
-        st.bar_chart(
-            chart_data.set_index("Category")
-        )
+        fig.update_layout(height=350, margin=dict(t=20, b=20))
+
+        st.plotly_chart(fig, use_container_width=True)
 
         # ---------------- DOWNLOAD REPORT ----------------
 
